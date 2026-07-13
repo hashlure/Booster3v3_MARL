@@ -26,11 +26,15 @@ def evaluate(model, difficulty, matches, duration, seed, hidden_size, layer_n,
     wins = draws = losses = goals_for = goals_against = scoreless = 0
     touches = shots = passes = saves = 0
     results = []
+    config = EnvConfig(ready_duration_sec=.2, set_duration_sec=.1,
+                       match_duration_sec=duration,
+                       max_episode_steps=int(duration / .1) + 300,
+                       randomize_reset=True, action_noise=0.0)
+    # Actor weights are immutable during evaluation. Loading the network once is
+    # substantially faster and avoids repeatedly constructing PyTorch resources.
+    learner = FrozenActorOpponent(Team.BLUE, config, model, hidden_size, layer_n)
+    opponent = RuleTreeOpponent(Team.RED, config, difficulty)
     for match in range(matches):
-        config = EnvConfig(ready_duration_sec=.2, set_duration_sec=.1,
-                           match_duration_sec=duration,
-                           max_episode_steps=int(duration / .1) + 300,
-                           randomize_reset=True, action_noise=0.0)
         env = Robocup3v3Env(config)
         env.reset(seed=seed + match)
         active_ids = {0: (), 1: (1,), 2: (1, 3), 3: (1, 2, 3)}[opponent_count]
@@ -39,8 +43,6 @@ def evaluate(model, difficulty, matches, duration, seed, hidden_size, layer_n,
                 robot.penalty = Penalty.SENT_OFF
                 robot.penalty_remaining = 1.0e9
                 robot.pose.y = config.field_width / 2.0 + 2.0 + robot.player_id
-        learner = FrozenActorOpponent(Team.BLUE, config, model, hidden_size, layer_n)
-        opponent = RuleTreeOpponent(Team.RED, config, difficulty)
         event_counts = {}
         while True:
             actions = learner.actions(env.state)

@@ -20,7 +20,6 @@ import setproctitle
 import torch
 
 from onpolicy.config import get_config
-from onpolicy.envs.env_wrappers import ShareDummyVecEnv, ShareSubprocVecEnv
 
 from robocup3v3.adapters.onpolicy import OnPolicyTeamEnv
 from robocup3v3.config import EnvConfig
@@ -89,6 +88,11 @@ def parse_args(argv):
 
 
 def make_envs(args, evaluation=False):
+    # Import multiprocessing-backed wrappers only for actual vector training.
+    # Frozen actor evaluation imports parse_args() to reconstruct the network and
+    # must not initialize multiprocessing resources at interpreter shutdown.
+    from onpolicy.envs.env_wrappers import ShareDummyVecEnv, ShareSubprocVecEnv
+
     count = args.n_eval_rollout_threads if evaluation else args.n_rollout_threads
 
     def factory(rank):
