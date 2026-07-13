@@ -33,7 +33,7 @@ def evaluate(model, difficulty, matches, duration, seed, hidden_size, layer_n,
                            randomize_reset=True, action_noise=0.0)
         env = Robocup3v3Env(config)
         env.reset(seed=seed + match)
-        active_ids = {0: (), 1: (3,), 2: (1, 3), 3: (1, 2, 3)}[opponent_count]
+        active_ids = {0: (), 1: (1,), 2: (1, 3), 3: (1, 2, 3)}[opponent_count]
         for robot in env.state.team_robots(Team.RED):
             if robot.player_id not in active_ids:
                 robot.penalty = Penalty.SENT_OFF
@@ -90,10 +90,15 @@ def main():
     parser.add_argument("--hidden_size", type=int, default=512)
     parser.add_argument("--layer_N", type=int, default=3)
     parser.add_argument("--opponent_count", type=int, choices=(0, 1, 2, 3), default=3)
+    parser.add_argument("--opponents", type=str, default="novice,standard,expert")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     report = {"actor": str(args.actor), "evaluations": {}}
-    for index, difficulty in enumerate(("novice", "standard", "expert")):
+    difficulties = tuple(value.strip() for value in args.opponents.split(",") if value.strip())
+    invalid = set(difficulties) - set(RuleTreeOpponent.ALL_DIFFICULTIES)
+    if not difficulties or invalid:
+        raise ValueError("invalid opponents: %s" % sorted(invalid))
+    for index, difficulty in enumerate(difficulties):
         result = evaluate(args.actor, difficulty, args.matches, args.duration,
                           args.seed + index * 1000, args.hidden_size, args.layer_N,
                           args.opponent_count)

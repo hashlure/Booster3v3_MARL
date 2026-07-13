@@ -96,7 +96,7 @@ class OnPolicyTeamEnv:
         self.matches = self.wins = self.draws = self.losses = 0
         self.goals_for = self.goals_against = 0
         self.opponent_difficulty = "standard"
-        self.difficulty_counts = {name: 0 for name in RuleTreeOpponent.DIFFICULTIES}
+        self.difficulty_counts = {name: 0 for name in RuleTreeOpponent.ALL_DIFFICULTIES}
         self.difficulty_counts["actor"] = 0
         self.opponent_id_counts = {}
 

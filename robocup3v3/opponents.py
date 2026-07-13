@@ -14,6 +14,7 @@ class RuleTreeOpponent:
     """Behavior-tree-style opponent mirroring the deployed default tactics."""
 
     DIFFICULTIES = ("stationary", "novice", "standard", "expert")
+    ALL_DIFFICULTIES = DIFFICULTIES + ("counter",)
 
     def __init__(self, team: Team, config: EnvConfig, difficulty="standard"):
         self.team = team
@@ -21,7 +22,7 @@ class RuleTreeOpponent:
         self.set_difficulty(difficulty)
 
     def set_difficulty(self, difficulty):
-        if difficulty not in self.DIFFICULTIES:
+        if difficulty not in self.ALL_DIFFICULTIES:
             raise ValueError("unknown behavior-tree difficulty: %s" % difficulty)
         self.difficulty = difficulty
 
@@ -36,6 +37,8 @@ class RuleTreeOpponent:
             return {robot.name: PlannerAction() for robot in state.team_robots(self.team)}
         if self.difficulty == "novice":
             return self._novice_actions(state)
+        if self.difficulty == "counter":
+            return self._counter_actions(state)
         robots = state.team_robots(self.team)
         field = [robot for robot in robots if robot.player_id != 3 and robot.active]
         chaser = min(
@@ -109,6 +112,84 @@ class RuleTreeOpponent:
                 # deployment motion layer can orient the receiver toward play.
                 sx, sy = self._safe_target(bx + 1.1, by + side * 1.6)
                 result[robot.name] = PlannerAction(PlannerIntent.MOVE, sx, sy, bx, by)
+        return result
+
+    def _counter_actions(self, state):
+        """Low block plus one presser, designed to punish direct-shot policies."""
+        robots = state.team_robots(self.team)
+        field = [robot for robot in robots if robot.active and robot.player_id != 3]
+        presser = min(field, key=lambda robot: math.hypot(
+            robot.pose.x - state.ball.x, robot.pose.y - state.ball.y)) if field else None
+        cover = next((robot for robot in field if robot is not presser), None)
+        bx, by = world_to_team(self.team, state.ball.x, state.ball.y)
+        half_l = self.config.field_length / 2.0
+        result = {}
+        for robot in robots:
+            if not robot.active:
+                result[robot.name] = PlannerAction()
+                continue
+            rx, ry = world_to_team(self.team, robot.pose.x, robot.pose.y)
+            if robot.player_id == 3:
+                distance = math.hypot(robot.pose.x - state.ball.x, robot.pose.y - state.ball.y)
+                danger = bx < -half_l + self.config.penalty_area_length + .5
+                if danger and distance <= self.config.kick_distance:
+                    if not self._facing_ball(robot, state):
+                        result[robot.name] = PlannerAction(PlannerIntent.MOVE, rx, ry, bx, by)
+                    else:
+                        outlet_y = -2.7 if by >= 0 else 2.7
+                        result[robot.name] = PlannerAction(
+                            PlannerIntent.PASS, bx, by, -1.0, outlet_y)
+                elif danger:
+                    result[robot.name] = PlannerAction(
+                        PlannerIntent.GUARD, -half_l + .55,
+                        max(-1.15, min(1.15, by * .82)), bx, by)
+                else:
+                    result[robot.name] = PlannerAction(
+                        PlannerIntent.GUARD, -half_l + .55,
+                        max(-.85, min(.85, by * .55)), bx, by)
+            elif robot is presser:
+                distance = math.hypot(robot.pose.x - state.ball.x, robot.pose.y - state.ball.y)
+                if distance > self.config.kick_distance:
+                    # Approach from the goal side so the carrier is forced away
+                    # from the central shooting lane.
+                    tx = max(-half_l + .9, bx - .22)
+                    ty = by + (.18 if by <= 0 else -.18)
+                    result[robot.name] = PlannerAction(PlannerIntent.MOVE, tx, ty, bx, by)
+                elif not self._facing_ball(robot, state):
+                    result[robot.name] = PlannerAction(PlannerIntent.MOVE, rx, ry, bx, by)
+                else:
+                    teammate = cover
+                    if teammate is not None:
+                        tx, ty = world_to_team(self.team, teammate.pose.x, teammate.pose.y)
+                    else:
+                        tx, ty = bx + 1.0, -math.copysign(2.5, by or 1.0)
+                    pressured = any(
+                        opponent.active and math.hypot(opponent.pose.x - robot.pose.x,
+                                                       opponent.pose.y - robot.pose.y) < 1.3
+                        for opponent in state.team_robots(self.team.opponent))
+                    if pressured and teammate is not None and not self._lane_blockers(state, bx, by, tx, ty):
+                        result[robot.name] = PlannerAction(PlannerIntent.PASS, bx, by, tx, ty)
+                    else:
+                        opponents = [
+                            (*world_to_team(self.team, item.pose.x, item.pose.y), item.radius)
+                            for item in state.team_robots(self.team.opponent) if item.active
+                        ]
+                        goal_y = best_shot_target_y(bx, by, opponents, self.config)
+                        result[robot.name] = PlannerAction(
+                            PlannerIntent.SHOOT, bx, by, half_l, goal_y)
+            else:
+                own_possession = state.ball.last_touch_team is self.team
+                if own_possession:
+                    # Wide outlet for the counterattack, facing the ball carrier.
+                    side = -1.0 if by >= 0 else 1.0
+                    tx, ty = self._safe_target(bx + 1.6, by + side * 2.0)
+                else:
+                    # Intersect the ball-to-goal line and maintain separation
+                    # from the presser instead of chasing the same ball.
+                    tx = max(-half_l + 1.25, min(-.35, bx - 1.65))
+                    ratio = max(0.0, min(1.0, (tx + half_l) / max(bx + half_l, .2)))
+                    ty = max(-1.35, min(1.35, by * ratio))
+                result[robot.name] = PlannerAction(PlannerIntent.MOVE, tx, ty, bx, by)
         return result
 
     def _novice_actions(self, state):

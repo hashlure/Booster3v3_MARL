@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 
-BT_RATINGS = {"novice": 900.0, "standard": 1200.0, "expert": 1500.0}
+BT_RATINGS = {"novice": 900.0, "standard": 1200.0, "expert": 1500.0, "counter": 1600.0}
 
 
 def _entry(entry_id, kind, rating, path=None, anchor=False):
@@ -36,9 +36,16 @@ class LeaguePool:
                     _entry("bt_novice", "behavior_tree", BT_RATINGS["novice"]),
                     _entry("bt_standard", "behavior_tree", BT_RATINGS["standard"], anchor=True),
                     _entry("bt_expert", "behavior_tree", BT_RATINGS["expert"], anchor=True),
+                    _entry("bt_counter", "behavior_tree", BT_RATINGS["counter"], anchor=True),
                 ],
             }
             self.save(data)
+        else:
+            data = self.load()
+            if not any(entry["id"] == "bt_counter" for entry in data["entries"]):
+                data["entries"].append(
+                    _entry("bt_counter", "behavior_tree", BT_RATINGS["counter"], anchor=True))
+                self.save(data)
 
     def load(self):
         with self.manifest_path.open("r", encoding="utf-8") as stream:

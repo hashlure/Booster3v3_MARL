@@ -264,7 +264,7 @@ class SMACRunner(Runner):
                             football_metrics["opponent_sampling_target/anchors"] = 0.15
                             football_metrics["opponent_sampling_target/diversity"] = 0.10
                         type_deltas = {}
-                        for difficulty in ("stationary", "novice", "standard", "expert", "actor"):
+                        for difficulty in ("stationary", "novice", "standard", "expert", "counter", "actor"):
                             key = "opponent_%s_matches" % difficulty
                             current = np.asarray([
                                 float(info[0].get(key, 0)) for info in infos
