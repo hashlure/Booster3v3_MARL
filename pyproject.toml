@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robocup3v3"
+version = "0.1.0"
+description = "CTDE-ready lightweight 3v3 soccer environment aligned with Booster Agent contracts"
+requires-python = ">=3.8"
+dependencies = ["numpy>=1.17"]
+
+[project.optional-dependencies]
+api = ["gymnasium>=0.29", "pettingzoo>=1.24"]
+render = ["pygame>=2.5"]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["robocup3v3*"]
+

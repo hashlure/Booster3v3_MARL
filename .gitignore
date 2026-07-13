@@ -1,0 +1,55 @@
+# Training artifacts and experiment tracking
+results/
+wandb/
+**/wandb/
+runs/
+checkpoints/
+videos/
+logs/
+
+# Model and media artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.torchscript
+*.tflite
+*.npz
+*.npy
+*.mp4
+*.avi
+*.mov
+*.gif
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# IDE and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+*.log
+
+# Large third-party research checkout used only as a reference
+TiZero/
