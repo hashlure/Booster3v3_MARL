@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +18,7 @@ import torch
 from PIL import Image, ImageDraw
 
 from onpolicy.algorithms.r_mappo.algorithm.r_actor_critic import R_Actor
-from robocup3v3.actions import N_ACTIONS, available_actions, decode_action
+from robocup3v3.actions import ACTION_NAMES, N_ACTIONS, available_actions, decode_action
 from robocup3v3.config import EnvConfig
 from robocup3v3.env import Robocup3v3Env
 from robocup3v3.observations import local_observation, observation_size
@@ -27,7 +28,7 @@ from robocup3v3.types import Team
 from training.train_mappo import parse_args as parse_mappo_args
 
 
-TREE_CHOICES = RuleTreeOpponent.DIFFICULTIES
+TREE_CHOICES = RuleTreeOpponent.ALL_DIFFICULTIES
 
 
 class LearnedTeam:
@@ -46,18 +47,60 @@ class LearnedTeam:
                              Discrete(N_ACTIONS), device=device)
         self.actor.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True))
         self.actor.eval()
+        self.last_decisions = []
 
     def actions(self, state):
         result = {}
+        self.last_decisions = []
         for robot in state.team_robots(self.team):
+            started = time.perf_counter()
             observation = torch.as_tensor(
                 local_observation(state, robot, self.config)[None], device=self.device)
             mask = available_actions(robot, state, self.config)
             with torch.no_grad():
                 logits = self.actor.act.action_out.linear(self.actor.base(observation))
+                raw_logits = logits.detach().cpu().reshape(-1).tolist()
                 logits.masked_fill_(torch.as_tensor(mask[None], device=self.device) <= 0, -1e9)
                 action_id = int(logits.argmax(dim=-1).item())
-            result[robot.name] = decode_action(action_id, robot, state, self.config)
+            planner = decode_action(action_id, robot, state, self.config)
+            result[robot.name] = planner
+            self.last_decisions.append({
+                "record_type": "rl_decision", "event": "rl_decision",
+                "schema_version": 1, "source": "training_simulator",
+                "team": self.team.value, "step": state.step_count,
+                "match_time_sec": state.elapsed,
+                "game_state": state.game_state.value,
+                "set_play": state.set_play.value,
+                "player_id": robot.player_id,
+                "observation": observation.detach().cpu().reshape(-1).tolist(),
+                "action_mask": mask.tolist(), "logits": raw_logits,
+                "legal_action_count": int((mask > 0).sum()),
+                "action_id": action_id, "action_name": ACTION_NAMES[action_id],
+                "inference_ms": (time.perf_counter() - started) * 1000.0,
+                "ball": {"x": state.ball.x, "y": state.ball.y, "age_sec": 0.0,
+                         "vx": state.ball.vx, "vy": state.ball.vy},
+                "self_robot": {"pose": {"x": robot.pose.x, "y": robot.pose.y,
+                                           "theta": robot.pose.theta}, "age_sec": 0.0,
+                               "vx": robot.vx, "vy": robot.vy},
+                "teammates": {
+                    str(item.player_id): {"pose": {"x": item.pose.x, "y": item.pose.y,
+                                                     "theta": item.pose.theta},
+                                          "active": item.active}
+                    for item in state.team_robots(self.team)
+                },
+                "opponents": {
+                    str(item.player_id): {"pose": {"x": item.pose.x, "y": item.pose.y,
+                                                     "theta": item.pose.theta},
+                                          "active": item.active}
+                    for item in state.team_robots(self.team.opponent)
+                },
+                "command": {
+                    "intent": planner.intent.value,
+                    "target_x": planner.target_x, "target_y": planner.target_y,
+                    "kick_target_x": planner.kick_target_x,
+                    "kick_target_y": planner.kick_target_y,
+                },
+            })
         return result
 
 
@@ -76,6 +119,8 @@ def main():
     parser.add_argument("--blue_actor", type=Path)
     parser.add_argument("--red_actor", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--trace_jsonl", type=Path,
+                        help="optional per-player policy decision trace")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--duration", type=float, default=60.0)
     parser.add_argument("--fps", type=int, default=10)
@@ -97,10 +142,19 @@ def main():
                       args.hidden_size, args.layer_N)
     red = controller(args.red, Team.RED, config, args.red_actor, device,
                      args.hidden_size, args.layer_N)
+    trace_fp = None
+    if args.trace_jsonl:
+        args.trace_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        trace_fp = args.trace_jsonl.open("w", encoding="utf-8")
     frames, events = [], {}
     while True:
         actions = blue.actions(env.state)
         actions.update(red.actions(env.state))
+        if trace_fp is not None:
+            for decision in getattr(blue, "last_decisions", ()):
+                trace_fp.write(json.dumps(decision, separators=(",", ":")) + "\n")
+            for decision in getattr(red, "last_decisions", ()):
+                trace_fp.write(json.dumps(decision, separators=(",", ":")) + "\n")
         _, _, terminated, truncated, infos = env.step(actions)
         for event in infos["blue_1"]["events"]:
             events[event["kind"]] = events.get(event["kind"], 0) + 1
@@ -126,6 +180,8 @@ def main():
         "steps": env.state.step_count, "events": events, "frames": len(frames),
     }
     args.output.with_suffix(".json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    if trace_fp is not None:
+        trace_fp.close()
     print("RECORDED %s score=%d:%d frames=%d" %
           (args.output, env.state.score[Team.BLUE], env.state.score[Team.RED], len(frames)))
 
